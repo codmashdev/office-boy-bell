@@ -27,4 +27,19 @@ public class WebNotificationBridge {
                 safeUrl
         );
     }
+
+    @JavascriptInterface
+    public void indicatorState(String type, boolean active, String signature, String url) {
+        String safeUrl = url != null && url.startsWith("https://www.peopleperhour.com")
+                ? url
+                : "https://www.peopleperhour.com/dashboard";
+
+        NotificationHelper.handleIndicatorState(
+                context,
+                type,
+                active,
+                signature,
+                safeUrl
+        );
+    }
 }
