@@ -15,6 +15,7 @@ public final class NotificationHelper {
     private static final String MONITOR_CHANNEL_ID = "pph_monitor";
     public static final int MONITOR_NOTIFICATION_ID = 71042;
     private static final String PREFS = "pph_notification_prefs";
+    private static final String INDICATOR_PREFS = "pph_indicator_state";
 
     private NotificationHelper() {}
 
@@ -32,7 +33,7 @@ public final class NotificationHelper {
                     "PeoplePerHour Alerts",
                     NotificationManager.IMPORTANCE_HIGH
             );
-            alerts.setDescription("PeoplePerHour messages, job and account activity alerts");
+            alerts.setDescription("PeoplePerHour messages, notifications, jobs and account activity");
             alerts.enableVibration(true);
             alerts.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
             manager.createNotificationChannel(alerts);
@@ -42,7 +43,7 @@ public final class NotificationHelper {
                     "PPH Background Monitor",
                     NotificationManager.IMPORTANCE_LOW
             );
-            monitor.setDescription("Keeps PeoplePerHour monitoring active while the app is in the background");
+            monitor.setDescription("Keeps PeoplePerHour activity monitoring active while the app is in the background");
             monitor.setLockscreenVisibility(Notification.VISIBILITY_PRIVATE);
             manager.createNotificationChannel(monitor);
         }
@@ -66,7 +67,7 @@ public final class NotificationHelper {
         return builder
                 .setSmallIcon(R.drawable.ic_launcher)
                 .setContentTitle("PPH monitoring active")
-                .setContentText("Checking for PeoplePerHour messages and notifications")
+                .setContentText("Watching PPH message and notification activity")
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
                 .setContentIntent(pendingIntent)
@@ -77,13 +78,72 @@ public final class NotificationHelper {
 
     public static void showEnabledNoticeOnce(Context context) {
         SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        if (prefs.getBoolean("enabled_notice_shown_v13", false)) return;
-        prefs.edit().putBoolean("enabled_notice_shown_v13", true).apply();
+        if (prefs.getBoolean("enabled_notice_shown_v15", false)) return;
+        prefs.edit().putBoolean("enabled_notice_shown_v15", true).apply();
         show(context,
-                "pph_notifications_enabled_v13",
-                "PPH notifications enabled",
-                "Background monitoring is active. Keep the PPH monitoring notification running for lock-screen alerts.",
+                "pph_notifications_enabled_v15",
+                "PPH activity monitoring enabled",
+                "The app now watches PPH message and notification indicators, including colored-dot changes.",
                 "https://www.peopleperhour.com/freelance-jobs");
+    }
+
+    public static synchronized void handleIndicatorState(
+            Context context,
+            String type,
+            boolean active,
+            String signature,
+            String url
+    ) {
+        if (context == null) return;
+
+        String normalizedType = type == null ? "activity" : type.trim().toLowerCase();
+        if (normalizedType.isEmpty()) normalizedType = "activity";
+
+        String normalizedSignature = signature == null ? "" : signature.trim();
+        if (normalizedSignature.length() > 1500) {
+            normalizedSignature = normalizedSignature.substring(0, 1500);
+        }
+
+        SharedPreferences prefs = context.getSharedPreferences(INDICATOR_PREFS, Context.MODE_PRIVATE);
+        String signatureKey = "signature_" + normalizedType;
+        String activeKey = "active_" + normalizedType;
+        boolean hasPrevious = prefs.contains(signatureKey) || prefs.contains(activeKey);
+        String previousSignature = prefs.getString(signatureKey, "");
+        boolean previousActive = prefs.getBoolean(activeKey, false);
+
+        prefs.edit()
+                .putString(signatureKey, normalizedSignature)
+                .putBoolean(activeKey, active)
+                .putLong("last_seen_" + normalizedType, System.currentTimeMillis())
+                .apply();
+
+        if (!hasPrevious) return;
+        if (!active) return;
+
+        boolean becameActive = !previousActive;
+        boolean changedWhileActive = previousActive && !normalizedSignature.equals(previousSignature);
+        if (!becameActive && !changedWhileActive) return;
+
+        String title;
+        String body;
+        if (normalizedType.contains("message") || normalizedType.contains("inbox") || normalizedType.contains("workstream")) {
+            title = "New PeoplePerHour message activity";
+            body = "PeoplePerHour shows new message/WorkStream activity. Tap to check it.";
+        } else if (normalizedType.contains("notification") || normalizedType.contains("alert") || normalizedType.contains("bell")) {
+            title = "New PeoplePerHour notification";
+            body = "PeoplePerHour shows new notification activity. Tap to check it.";
+        } else {
+            title = "New PeoplePerHour activity";
+            body = "New activity was detected in your PeoplePerHour account.";
+        }
+
+        show(
+                context,
+                "indicator_" + normalizedType + "_" + System.currentTimeMillis(),
+                title,
+                body,
+                url
+        );
     }
 
     public static void showOnce(Context context, String key, String title, String body, String url) {
@@ -122,7 +182,9 @@ public final class NotificationHelper {
                 .setContentIntent(pendingIntent)
                 .setVisibility(Notification.VISIBILITY_PUBLIC)
                 .setCategory(Notification.CATEGORY_MESSAGE)
-                .setPriority(Notification.PRIORITY_HIGH);
+                .setPriority(Notification.PRIORITY_HIGH)
+                .setWhen(System.currentTimeMillis())
+                .setShowWhen(true);
 
         NotificationManager manager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
         if (manager != null) manager.notify(requestCode, builder.build());
