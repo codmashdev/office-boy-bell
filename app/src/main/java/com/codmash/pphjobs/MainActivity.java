@@ -2,7 +2,9 @@ package com.codmash.pphjobs;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.app.DownloadManager;
+import android.app.NotificationManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -11,6 +13,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.provider.Settings;
 import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
@@ -41,7 +44,6 @@ public class MainActivity extends Activity {
 
         NotificationHelper.createChannel(this);
         NotificationSyncService.schedule(this);
-        requestNotificationPermissionIfNeeded();
 
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(Color.WHITE);
@@ -74,6 +76,71 @@ public class MainActivity extends Activity {
             webView.restoreState(savedInstanceState);
         } else {
             webView.loadUrl(initialUrl);
+        }
+
+        root.postDelayed(this::showNotificationSetup, 700);
+    }
+
+    private void showNotificationSetup() {
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Enable PeoplePerHour notifications")
+                    .setMessage("Allow notifications so new PeoplePerHour job and account alerts can appear in your notification tray and on your lock screen.")
+                    .setCancelable(false)
+                    .setPositiveButton("Enable notifications", (dialog, which) ->
+                            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, NOTIFICATION_PERMISSION_REQUEST))
+                    .setNegativeButton("Not now", null)
+                    .show();
+            return;
+        }
+
+        if (notificationsAreEnabled()) {
+            NotificationHelper.showEnabledNoticeOnce(this);
+        } else {
+            showNotificationSettingsDialog();
+        }
+    }
+
+    private boolean notificationsAreEnabled() {
+        NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        return manager != null && (Build.VERSION.SDK_INT < 24 || manager.areNotificationsEnabled());
+    }
+
+    private void showNotificationSettingsDialog() {
+        new AlertDialog.Builder(this)
+                .setTitle("Notifications are off")
+                .setMessage("Android currently has notifications disabled for this app. Open App notification settings and turn on Allow notifications.")
+                .setPositiveButton("Open settings", (dialog, which) -> openNotificationSettings())
+                .setNegativeButton("Later", null)
+                .show();
+    }
+
+    private void openNotificationSettings() {
+        try {
+            Intent intent = new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS);
+            intent.putExtra(Settings.EXTRA_APP_PACKAGE, getPackageName());
+            startActivity(intent);
+        } catch (Exception e) {
+            Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+            intent.setData(Uri.parse("package:" + getPackageName()));
+            startActivity(intent);
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == NOTIFICATION_PERMISSION_REQUEST) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                NotificationHelper.show(this,
+                        "permission_test_" + System.currentTimeMillis(),
+                        "PPH notifications are working",
+                        "You will now be able to receive PeoplePerHour alerts in the notification tray and on the lock screen.",
+                        START_URL);
+                Toast.makeText(this, "Notifications enabled", Toast.LENGTH_SHORT).show();
+            } else {
+                showNotificationSettingsDialog();
+            }
         }
     }
 
@@ -194,22 +261,6 @@ public class MainActivity extends Activity {
                 "setTimeout(scan,1200);setInterval(scan,30000);" +
                 "})();";
         view.evaluateJavascript(script, null);
-    }
-
-    private void requestNotificationPermissionIfNeeded() {
-        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, NOTIFICATION_PERMISSION_REQUEST);
-        } else {
-            NotificationHelper.showEnabledNoticeOnce(this);
-        }
-    }
-
-    @Override
-    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        if (requestCode == NOTIFICATION_PERMISSION_REQUEST && grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-            NotificationHelper.showEnabledNoticeOnce(this);
-        }
     }
 
     private boolean handleUrl(Uri uri) {
