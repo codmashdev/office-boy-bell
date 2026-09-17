@@ -19,9 +19,9 @@ public class WebNotificationBridge {
                 ? url
                 : "https://www.peopleperhour.com/freelance-jobs";
 
-        NotificationHelper.showOnce(
+        NotificationHelper.show(
                 context,
-                "web|" + safeTitle + "|" + safeBody,
+                "web_live_" + System.currentTimeMillis(),
                 safeTitle,
                 safeBody,
                 safeUrl
