@@ -86,7 +86,7 @@ public class ForegroundMonitorService extends Service {
         settings.setDatabaseEnabled(true);
         settings.setAllowContentAccess(true);
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
-        settings.setUserAgentString(settings.getUserAgentString() + " PPHJobsNotify/1.4");
+        settings.setUserAgentString(settings.getUserAgentString() + " PPHJobsNotify/1.5");
 
         CookieManager cookies = CookieManager.getInstance();
         cookies.setAcceptCookie(true);
@@ -119,40 +119,16 @@ public class ForegroundMonitorService extends Service {
         String script = "(function(){try{" +
                 "function clean(s){return (s||'').replace(/\\s+/g,' ').trim();}" +
                 "function abs(h){try{return h?new URL(h,location.href).href:'';}catch(e){return h||'';}}" +
-                "var rows=[];var seen={};" +
-                "function add(el){" +
-                "if(!el)return;" +
-                "var txt=clean(el.innerText||el.textContent||el.getAttribute('aria-label')||el.getAttribute('title'));" +
-                "var href=abs(el.getAttribute('href')||((el.closest&&el.closest('a'))?el.closest('a').getAttribute('href'):'')||'');" +
-                "var cls=String(el.className||'').toLowerCase();" +
-                "var aria=String(el.getAttribute('aria-label')||'').toLowerCase();" +
-                "var all=(cls+' '+aria+' '+href.toLowerCase()+' '+txt.toLowerCase());" +
-                "if(!/unread|notification|message|workstream|inbox|badge|counter|proposal|offer|invoice|payment/.test(all))return;" +
-                "if(!txt)txt=href;" +
-                "if(!txt)return;" +
-                "if(txt.length>240)txt=txt.substring(0,240);" +
-                "var generic=/^(notifications?|messages?|workstream|inbox|dashboard|menu|view all|see all)$/i.test(txt);" +
-                "if(generic&&!href)return;" +
-                "var key=txt+'|'+href;if(seen[key])return;seen[key]=1;" +
-                "rows.push(txt+'\\u001D'+href);" +
-                "}" +
-                "var selectors=[" +
-                "'[class*=unread]'," +
-                "'[class*=notification]'," +
-                "'[class*=message]'," +
-                "'[class*=workstream]'," +
-                "'[class*=inbox]'," +
-                "'[class*=badge]'," +
-                "'[class*=counter]'," +
-                "'[aria-label*=notification i]'," +
-                "'[aria-label*=message i]'," +
-                "'[aria-label*=workstream i]'," +
-                "'a[href*=workstream]'," +
-                "'a[href*=notification]'," +
-                "'a[href*=message]'," +
-                "'a[href*=inbox]'" +
-                "];" +
+                "function visible(el){if(!el)return false;var s=getComputedStyle(el),r=el.getBoundingClientRect();return s.display!=='none'&&s.visibility!=='hidden'&&s.opacity!=='0'&&r.width>0&&r.height>0;}" +
+                "function colorActive(el){if(!visible(el))return false;var s=getComputedStyle(el);var vals=[s.backgroundColor,s.color,s.borderTopColor,s.borderRightColor,s.borderBottomColor,s.borderLeftColor].join(' ').toLowerCase();return !/rgb\\(255, ?255, ?255\\)|rgb\\(0, ?0, ?0\\)|rgba\\(0, ?0, ?0, ?0\\)|transparent/.test(vals);}" +
+                "function looksActive(el){if(!el||!visible(el))return false;var c=(String(el.className||'')+' '+String(el.id||'')+' '+String(el.getAttribute('aria-label')||'')+' '+String(el.getAttribute('title')||'')).toLowerCase();if(/unread|active|new|badge|dot|indicator|counter|has-notification|has_notification|pending/.test(c))return true;var t=clean(el.innerText||el.textContent||'');if(/^\\d+$/.test(t)&&parseInt(t,10)>0)return true;return colorActive(el);}" +
+                "function inspect(type,selectors,target){var active=false,parts=[];selectors.forEach(function(q){try{document.querySelectorAll(q).forEach(function(el){var arr=[el];if(el.children)Array.prototype.forEach.call(el.children,function(c){arr.push(c);});arr.forEach(function(c){if(looksActive(c)){active=true;var x=clean(c.innerText||c.textContent||c.getAttribute('aria-label')||c.getAttribute('title')||String(c.className||''));if(x)parts.push(x.substring(0,120));}});});}catch(e){}});parts=parts.filter(function(v,i,a){return a.indexOf(v)===i;}).slice(0,8);if(window.PPHMonitor)PPHMonitor.onIndicatorState(type,active,parts.join('|'),target||location.href);}" +
+                "var rows=[],seen={};" +
+                "function add(el){if(!el)return;var txt=clean(el.innerText||el.textContent||el.getAttribute('aria-label')||el.getAttribute('title'));var href=abs(el.getAttribute('href')||((el.closest&&el.closest('a'))?el.closest('a').getAttribute('href'):'')||'');var cls=String(el.className||'').toLowerCase();var aria=String(el.getAttribute('aria-label')||'').toLowerCase();var all=(cls+' '+aria+' '+href.toLowerCase()+' '+txt.toLowerCase());if(!/unread|notification|message|workstream|inbox|badge|counter|proposal|offer|invoice|payment/.test(all))return;if(!txt)txt=href;if(!txt)return;if(txt.length>240)txt=txt.substring(0,240);var key=txt+'|'+href;if(seen[key])return;seen[key]=1;rows.push(txt+'\\u001D'+href);}" +
+                "var selectors=['[class*=unread]','[class*=notification]','[class*=message]','[class*=workstream]','[class*=inbox]','[class*=badge]','[class*=counter]','[aria-label*=notification i]','[aria-label*=message i]','[aria-label*=workstream i]','a[href*=workstream]','a[href*=notification]','a[href*=message]','a[href*=inbox]'];" +
                 "selectors.forEach(function(q){try{document.querySelectorAll(q).forEach(add);}catch(e){}});" +
+                "inspect('messages',['a[href*=workstream]','a[href*=message]','a[href*=inbox]','[class*=message]','[class*=workstream]','[class*=inbox]','[aria-label*=message i]','[title*=message i]'],'https://www.peopleperhour.com/dashboard');" +
+                "inspect('notifications',['a[href*=notification]','[class*=notification]','[aria-label*=notification i]','[title*=notification i]','[class*=bell]','[aria-label*=alert i]'],'https://www.peopleperhour.com/dashboard');" +
                 "if(window.PPHMonitor)PPHMonitor.onSnapshot(rows.join('\\u001E'),location.href);" +
                 "}catch(e){if(window.PPHMonitor)PPHMonitor.onSnapshot('',location.href);}})();";
 
@@ -160,6 +136,17 @@ public class ForegroundMonitorService extends Service {
     }
 
     private final class MonitorBridge {
+        @JavascriptInterface
+        public void onIndicatorState(String type, boolean active, String signature, String url) {
+            NotificationHelper.handleIndicatorState(
+                    ForegroundMonitorService.this,
+                    type,
+                    active,
+                    signature,
+                    url == null || url.isEmpty() ? DASHBOARD_URL : url
+            );
+        }
+
         @JavascriptInterface
         public void onSnapshot(String snapshot, String pageUrl) {
             if (snapshot == null) snapshot = "";
@@ -173,29 +160,22 @@ public class ForegroundMonitorService extends Service {
             LinkedHashSet<String> current = parseSnapshot(value);
             if (current.isEmpty()) return;
 
-            String previousRaw = prefs.getString("snapshot_v14", null);
-            prefs.edit().putString("snapshot_v14", value).apply();
+            String previousRaw = prefs.getString("snapshot_v15", null);
+            prefs.edit().putString("snapshot_v15", value).apply();
 
-            if (previousRaw == null) {
-                return;
-            }
+            if (previousRaw == null) return;
 
             Set<String> previous = parseSnapshot(previousRaw);
             List<String> added = new ArrayList<>();
-
             for (String item : current) {
-                if (!previous.contains(item)) {
-                    added.add(item);
-                }
+                if (!previous.contains(item)) added.add(item);
             }
-
             if (added.isEmpty()) return;
 
             int index = 0;
             for (String rawItem : added) {
                 NotificationItem item = parseItem(rawItem);
                 if (item.text.isEmpty()) continue;
-
                 String targetUrl = item.url.startsWith("https://www.peopleperhour.com")
                         ? item.url
                         : (pageUrl != null && pageUrl.startsWith("https://www.peopleperhour.com") ? pageUrl : DASHBOARD_URL);
@@ -203,7 +183,7 @@ public class ForegroundMonitorService extends Service {
                 NotificationHelper.show(
                         ForegroundMonitorService.this,
                         "pph_live_" + System.currentTimeMillis() + "_" + (index++),
-                        "New PeoplePerHour notification",
+                        "New PeoplePerHour activity",
                         item.text,
                         targetUrl
                 );
@@ -214,7 +194,6 @@ public class ForegroundMonitorService extends Service {
     private LinkedHashSet<String> parseSnapshot(String raw) {
         LinkedHashSet<String> result = new LinkedHashSet<>();
         if (raw == null || raw.isEmpty()) return result;
-
         String[] records = raw.split(RECORD_SEPARATOR, -1);
         for (String record : records) {
             String item = record == null ? "" : record.trim();
@@ -227,16 +206,12 @@ public class ForegroundMonitorService extends Service {
         if (raw == null) return new NotificationItem("", "");
         int pos = raw.indexOf(FIELD_SEPARATOR);
         if (pos < 0) return new NotificationItem(raw.trim(), "");
-
-        String text = raw.substring(0, pos).trim();
-        String url = raw.substring(pos + FIELD_SEPARATOR.length()).trim();
-        return new NotificationItem(text, url);
+        return new NotificationItem(raw.substring(0, pos).trim(), raw.substring(pos + FIELD_SEPARATOR.length()).trim());
     }
 
     private static final class NotificationItem {
         final String text;
         final String url;
-
         NotificationItem(String text, String url) {
             this.text = text == null ? "" : text;
             this.url = url == null ? "" : url;
