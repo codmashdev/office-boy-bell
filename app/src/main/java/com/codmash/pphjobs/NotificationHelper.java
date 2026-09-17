@@ -18,6 +18,10 @@ public final class NotificationHelper {
 
     private NotificationHelper() {}
 
+    public static void createChannel(Context context) {
+        createChannels(context);
+    }
+
     public static void createChannels(Context context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationManager manager = context.getSystemService(NotificationManager.class);
