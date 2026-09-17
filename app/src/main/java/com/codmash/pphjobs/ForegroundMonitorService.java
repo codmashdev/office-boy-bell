@@ -4,6 +4,7 @@ import android.app.Notification;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
@@ -13,11 +14,19 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
+
 public class ForegroundMonitorService extends Service {
 
     private static final String ACTION_REFRESH = "com.codmash.pphjobs.REFRESH_MONITOR";
-    private static final long REFRESH_MS = 60_000L;
+    private static final long REFRESH_MS = 45_000L;
     private static final String DASHBOARD_URL = "https://www.peopleperhour.com/dashboard";
+    private static final String PREFS = "pph_background_monitor";
+    private static final String RECORD_SEPARATOR = "\u001E";
+    private static final String FIELD_SEPARATOR = "\u001D";
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private WebView monitorWebView;
@@ -77,7 +86,7 @@ public class ForegroundMonitorService extends Service {
         settings.setDatabaseEnabled(true);
         settings.setAllowContentAccess(true);
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
-        settings.setUserAgentString(settings.getUserAgentString() + " PPHJobsNotify/1.3");
+        settings.setUserAgentString(settings.getUserAgentString() + " PPHJobsNotify/1.4");
 
         CookieManager cookies = CookieManager.getInstance();
         cookies.setAcceptCookie(true);
@@ -90,8 +99,9 @@ public class ForegroundMonitorService extends Service {
                 super.onPageFinished(view, url);
                 loading = false;
                 CookieManager.getInstance().flush();
-                handler.postDelayed(() -> scanPage(view), 1800);
-                handler.postDelayed(() -> scanPage(view), 5000);
+                handler.postDelayed(() -> scanPage(view), 1500);
+                handler.postDelayed(() -> scanPage(view), 4500);
+                handler.postDelayed(() -> scanPage(view), 9000);
             }
         });
     }
@@ -105,92 +115,132 @@ public class ForegroundMonitorService extends Service {
 
     private void scanPage(WebView view) {
         if (view == null) return;
+
         String script = "(function(){try{" +
                 "function clean(s){return (s||'').replace(/\\s+/g,' ').trim();}" +
-                "var parts=[];" +
+                "function abs(h){try{return h?new URL(h,location.href).href:'';}catch(e){return h||'';}}" +
+                "var rows=[];var seen={};" +
+                "function add(el){" +
+                "if(!el)return;" +
+                "var txt=clean(el.innerText||el.textContent||el.getAttribute('aria-label')||el.getAttribute('title'));" +
+                "var href=abs(el.getAttribute('href')||((el.closest&&el.closest('a'))?el.closest('a').getAttribute('href'):'')||'');" +
+                "var cls=String(el.className||'').toLowerCase();" +
+                "var aria=String(el.getAttribute('aria-label')||'').toLowerCase();" +
+                "var all=(cls+' '+aria+' '+href.toLowerCase()+' '+txt.toLowerCase());" +
+                "if(!/unread|notification|message|workstream|inbox|badge|counter|proposal|offer|invoice|payment/.test(all))return;" +
+                "if(!txt)txt=href;" +
+                "if(!txt)return;" +
+                "if(txt.length>240)txt=txt.substring(0,240);" +
+                "var generic=/^(notifications?|messages?|workstream|inbox|dashboard|menu|view all|see all)$/i.test(txt);" +
+                "if(generic&&!href)return;" +
+                "var key=txt+'|'+href;if(seen[key])return;seen[key]=1;" +
+                "rows.push(txt+'\\u001D'+href);" +
+                "}" +
                 "var selectors=[" +
                 "'[class*=unread]'," +
                 "'[class*=notification]'," +
                 "'[class*=message]'," +
                 "'[class*=workstream]'," +
+                "'[class*=inbox]'," +
                 "'[class*=badge]'," +
                 "'[class*=counter]'," +
                 "'[aria-label*=notification i]'," +
                 "'[aria-label*=message i]'," +
+                "'[aria-label*=workstream i]'," +
                 "'a[href*=workstream]'," +
                 "'a[href*=notification]'," +
                 "'a[href*=message]'," +
                 "'a[href*=inbox]'" +
                 "];" +
-                "selectors.forEach(function(q){" +
-                "document.querySelectorAll(q).forEach(function(el){" +
-                "var txt=clean(el.innerText||el.textContent||el.getAttribute('aria-label')||el.getAttribute('title'));" +
-                "var cls=String(el.className||'').toLowerCase();" +
-                "var aria=String(el.getAttribute('aria-label')||'').toLowerCase();" +
-                "var href=String(el.getAttribute('href')||'');" +
-                "if(!txt && !href)return;" +
-                "if(txt.length>180)txt=txt.substring(0,180);" +
-                "if(/unread|notification|message|workstream|badge|counter/.test(cls+' '+aria+' '+href.toLowerCase())){" +
-                "parts.push((txt||href));" +
-                "}" +
-                "});" +
-                "});" +
-                "var title=clean(document.title);if(title)parts.push('TITLE:'+title);" +
-                "parts=parts.filter(function(v,i,a){return v && a.indexOf(v)===i;}).slice(0,25);" +
-                "var summary=parts.join(' || ');" +
-                "if(window.PPHMonitor)PPHMonitor.onSnapshot(summary,location.href);" +
+                "selectors.forEach(function(q){try{document.querySelectorAll(q).forEach(add);}catch(e){}});" +
+                "if(window.PPHMonitor)PPHMonitor.onSnapshot(rows.join('\\u001E'),location.href);" +
                 "}catch(e){if(window.PPHMonitor)PPHMonitor.onSnapshot('',location.href);}})();";
+
         view.evaluateJavascript(script, null);
     }
 
     private final class MonitorBridge {
         @JavascriptInterface
-        public void onSnapshot(String snapshot, String url) {
+        public void onSnapshot(String snapshot, String pageUrl) {
             if (snapshot == null) snapshot = "";
-            final String value = snapshot.trim();
-            getSharedPreferences("pph_background_monitor", MODE_PRIVATE)
-                    .edit().putLong("last_check", System.currentTimeMillis()).apply();
+            String value = snapshot.trim();
+
+            SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+            prefs.edit().putLong("last_check", System.currentTimeMillis()).apply();
 
             if (value.isEmpty()) return;
 
-            android.content.SharedPreferences prefs = getSharedPreferences("pph_background_monitor", MODE_PRIVATE);
-            String previous = prefs.getString("snapshot", null);
-            prefs.edit().putString("snapshot", value).apply();
+            LinkedHashSet<String> current = parseSnapshot(value);
+            if (current.isEmpty()) return;
 
-            if (previous == null || previous.equals(value)) return;
+            String previousRaw = prefs.getString("snapshot_v14", null);
+            prefs.edit().putString("snapshot_v14", value).apply();
 
-            String message = findMeaningfulDifference(previous, value);
-            if (message == null || message.isEmpty()) return;
+            if (previousRaw == null) {
+                return;
+            }
 
-            NotificationHelper.showOnce(
-                    ForegroundMonitorService.this,
-                    "background_snapshot_" + Integer.toHexString(value.hashCode()),
-                    "New PeoplePerHour activity",
-                    message,
-                    url == null || url.isEmpty() ? DASHBOARD_URL : url
-            );
+            Set<String> previous = parseSnapshot(previousRaw);
+            List<String> added = new ArrayList<>();
+
+            for (String item : current) {
+                if (!previous.contains(item)) {
+                    added.add(item);
+                }
+            }
+
+            if (added.isEmpty()) return;
+
+            int index = 0;
+            for (String rawItem : added) {
+                NotificationItem item = parseItem(rawItem);
+                if (item.text.isEmpty()) continue;
+
+                String targetUrl = item.url.startsWith("https://www.peopleperhour.com")
+                        ? item.url
+                        : (pageUrl != null && pageUrl.startsWith("https://www.peopleperhour.com") ? pageUrl : DASHBOARD_URL);
+
+                NotificationHelper.show(
+                        ForegroundMonitorService.this,
+                        "pph_live_" + System.currentTimeMillis() + "_" + (index++),
+                        "New PeoplePerHour notification",
+                        item.text,
+                        targetUrl
+                );
+            }
         }
     }
 
-    private String findMeaningfulDifference(String oldValue, String newValue) {
-        String[] oldParts = oldValue.split(" \\|\\| ");
-        String[] newParts = newValue.split(" \\|\\| ");
-        java.util.HashSet<String> oldSet = new java.util.HashSet<>();
-        for (String s : oldParts) oldSet.add(s.trim());
+    private LinkedHashSet<String> parseSnapshot(String raw) {
+        LinkedHashSet<String> result = new LinkedHashSet<>();
+        if (raw == null || raw.isEmpty()) return result;
 
-        java.util.ArrayList<String> added = new java.util.ArrayList<>();
-        for (String s : newParts) {
-            String t = s.trim();
-            if (t.isEmpty() || oldSet.contains(t)) continue;
-            String lower = t.toLowerCase();
-            if (lower.startsWith("title:") && added.size() > 0) continue;
-            if (t.length() > 160) t = t.substring(0, 160) + "…";
-            added.add(t);
-            if (added.size() >= 3) break;
+        String[] records = raw.split(RECORD_SEPARATOR, -1);
+        for (String record : records) {
+            String item = record == null ? "" : record.trim();
+            if (!item.isEmpty()) result.add(item);
         }
+        return result;
+    }
 
-        if (added.isEmpty()) return null;
-        return android.text.TextUtils.join(" • ", added);
+    private NotificationItem parseItem(String raw) {
+        if (raw == null) return new NotificationItem("", "");
+        int pos = raw.indexOf(FIELD_SEPARATOR);
+        if (pos < 0) return new NotificationItem(raw.trim(), "");
+
+        String text = raw.substring(0, pos).trim();
+        String url = raw.substring(pos + FIELD_SEPARATOR.length()).trim();
+        return new NotificationItem(text, url);
+    }
+
+    private static final class NotificationItem {
+        final String text;
+        final String url;
+
+        NotificationItem(String text, String url) {
+            this.text = text == null ? "" : text;
+            this.url = url == null ? "" : url;
+        }
     }
 
     @Override
