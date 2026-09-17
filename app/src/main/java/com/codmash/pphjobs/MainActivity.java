@@ -93,7 +93,7 @@ public class MainActivity extends Activity {
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             new AlertDialog.Builder(this)
                     .setTitle("Enable PeoplePerHour notifications")
-                    .setMessage("Allow notifications so PeoplePerHour messages and account alerts can appear in your notification tray and on your lock screen, even while the app is in the background.")
+                    .setMessage("Allow notifications so PeoplePerHour message, notification and colored-dot activity can appear in your notification tray and on your lock screen.")
                     .setCancelable(false)
                     .setPositiveButton("Enable notifications", (dialog, which) ->
                             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, NOTIFICATION_PERMISSION_REQUEST))
@@ -145,9 +145,9 @@ public class MainActivity extends Activity {
                 NotificationHelper.show(this,
                         "permission_test_" + System.currentTimeMillis(),
                         "PPH notifications are working",
-                        "Background monitoring is now active. New detected PeoplePerHour messages and alerts can appear before you open the app.",
+                        "The app is now watching PPH message, notification and colored-dot activity.",
                         START_URL);
-                Toast.makeText(this, "Notifications and background monitoring enabled", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "Notifications and activity monitoring enabled", Toast.LENGTH_SHORT).show();
             } else {
                 showNotificationSettingsDialog();
             }
@@ -261,17 +261,26 @@ public class MainActivity extends Activity {
 
     private void injectNotificationWatcher(WebView view) {
         String script = "(function(){" +
-                "if(window.__pphNativeWatcher)return;window.__pphNativeWatcher=true;" +
-                "var last='';" +
+                "if(window.__pphNativeWatcherV15)return;window.__pphNativeWatcherV15=true;" +
                 "function clean(t){return (t||'').replace(/\\s+/g,' ').trim();}" +
+                "function visible(el){if(!el)return false;var s=getComputedStyle(el);var r=el.getBoundingClientRect();return s.display!=='none'&&s.visibility!=='hidden'&&s.opacity!=='0'&&r.width>0&&r.height>0;}" +
+                "function colorActive(el){if(!visible(el))return false;var s=getComputedStyle(el);var vals=[s.backgroundColor,s.color,s.borderTopColor,s.borderRightColor,s.borderBottomColor,s.borderLeftColor].join(' ').toLowerCase();if(/rgba?\\(0, ?0, ?0, ?0\\)|transparent/.test(vals)){}return !/rgb\\(255, ?255, ?255\\)|rgb\\(0, ?0, ?0\\)|rgba\\(0, ?0, ?0, ?0\\)|transparent/.test(vals);}" +
+                "function looksActive(el){if(!el||!visible(el))return false;var c=(String(el.className||'')+' '+String(el.id||'')+' '+String(el.getAttribute('aria-label')||'')+' '+String(el.getAttribute('title')||'')).toLowerCase();if(/unread|active|new|badge|dot|indicator|counter|has-notification|has_notification|pending/.test(c))return true;var t=clean(el.innerText||el.textContent||'');if(/^\\d+$/.test(t)&&parseInt(t,10)>0)return true;return colorActive(el);}" +
+                "function inspect(type,selectors,url){var active=false,parts=[];selectors.forEach(function(q){try{document.querySelectorAll(q).forEach(function(el){var candidates=[el];if(el.children)Array.prototype.forEach.call(el.children,function(c){candidates.push(c);});candidates.forEach(function(c){if(looksActive(c)){active=true;var x=clean(c.innerText||c.textContent||c.getAttribute('aria-label')||c.getAttribute('title')||String(c.className||''));if(x)parts.push(x.substring(0,120));}});});}catch(e){}});parts=parts.filter(function(v,i,a){return a.indexOf(v)===i;}).slice(0,8);if(window.PPHAndroid)PPHAndroid.indicatorState(type,active,parts.join('|'),url||location.href);}" +
                 "function scan(){try{" +
-                "var s=['[class*=notification][class*=unread]','[class*=notification] [class*=unread]','[class*=workstream][class*=unread]','[class*=message][class*=unread]','[aria-label*=Notification]','[aria-label*=notification]','[class*=badge]'];" +
-                "var found=[];s.forEach(function(q){document.querySelectorAll(q).forEach(function(el){var t=clean(el.innerText||el.textContent||el.getAttribute('aria-label'));if(t&&t.length<220)found.push(t);});});" +
-                "var text=found.filter(function(v,i,a){return a.indexOf(v)===i;}).slice(0,5).join(' • ');" +
-                "if(text&&text!==last){last=text;if(window.PPHAndroid)PPHAndroid.notifyNative('PeoplePerHour',text,location.href);}" +
+                "inspect('messages',[" +
+                "'a[href*=workstream]','a[href*=message]','a[href*=inbox]'," +
+                "'[class*=message]','[class*=workstream]','[class*=inbox]'," +
+                "'[aria-label*=message i]','[title*=message i]'" +
+                "],'https://www.peopleperhour.com/dashboard');" +
+                "inspect('notifications',[" +
+                "'a[href*=notification]','[class*=notification]'," +
+                "'[aria-label*=notification i]','[title*=notification i]'," +
+                "'[class*=bell]','[aria-label*=alert i]'" +
+                "],'https://www.peopleperhour.com/dashboard');" +
                 "}catch(e){}}" +
-                "new MutationObserver(function(){setTimeout(scan,350);}).observe(document.documentElement,{subtree:true,childList:true,attributes:true});" +
-                "setTimeout(scan,1200);setInterval(scan,30000);" +
+                "var timer=null;new MutationObserver(function(){clearTimeout(timer);timer=setTimeout(scan,250);}).observe(document.documentElement,{subtree:true,childList:true,attributes:true,attributeFilter:['class','style','aria-label','title','data-count']});" +
+                "setTimeout(scan,1200);setTimeout(scan,3500);setInterval(scan,10000);" +
                 "})();";
         view.evaluateJavascript(script, null);
     }
