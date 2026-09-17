@@ -15,11 +15,8 @@ import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -83,7 +80,7 @@ public class NotificationSyncService extends JobService {
     }
 
     private static void performSync(Context context) {
-        NotificationHelper.createChannel(context);
+        NotificationHelper.createChannels(context);
         syncJobs(context);
         syncAccountActivity(context);
     }
@@ -97,39 +94,25 @@ public class NotificationSyncService extends JobService {
             if (jobs.isEmpty()) return;
 
             SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-            Set<String> oldJobs = prefs.getStringSet("known_jobs", null);
+            Set<String> oldJobs = prefs.getStringSet("known_jobs_v14", null);
             LinkedHashSet<String> currentJobs = new LinkedHashSet<>(jobs.keySet());
 
             if (oldJobs != null) {
-                List<String> newLinks = new ArrayList<>();
+                int index = 0;
                 for (String link : currentJobs) {
-                    if (!oldJobs.contains(link)) newLinks.add(link);
-                }
-
-                if (!newLinks.isEmpty()) {
-                    String first = newLinks.get(0);
-                    String title = jobs.get(first);
-                    String body = newLinks.size() == 1
-                            ? title
-                            : newLinks.size() + " new PeoplePerHour jobs. Latest: " + title;
-
-                    NotificationHelper.showOnce(
+                    if (oldJobs.contains(link)) continue;
+                    String title = jobs.get(link);
+                    NotificationHelper.show(
                             context,
-                            "jobs|" + first,
-                            "New PeoplePerHour job" + (newLinks.size() > 1 ? "s" : ""),
-                            body,
-                            "https://www.peopleperhour.com" + first
+                            "job_" + System.currentTimeMillis() + "_" + (index++),
+                            "New PeoplePerHour job",
+                            title == null || title.isEmpty() ? "A new PeoplePerHour job is available" : title,
+                            "https://www.peopleperhour.com" + link
                     );
                 }
             }
 
-            LinkedHashSet<String> limited = new LinkedHashSet<>();
-            int count = 0;
-            for (String link : currentJobs) {
-                limited.add(link);
-                if (++count >= 40) break;
-            }
-            prefs.edit().putStringSet("known_jobs", limited).apply();
+            prefs.edit().putStringSet("known_jobs_v14", currentJobs).apply();
         } catch (Exception ignored) {
         }
     }
@@ -154,19 +137,19 @@ public class NotificationSyncService extends JobService {
 
             SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
             String signature = Integer.toHexString(summary.hashCode());
-            String previous = prefs.getString("activity_signature", null);
+            String previous = prefs.getString("activity_signature_v14", null);
 
             if (previous != null && !previous.equals(signature)) {
-                NotificationHelper.showOnce(
+                NotificationHelper.show(
                         context,
-                        "activity|" + signature,
+                        "activity_" + System.currentTimeMillis(),
                         "New PeoplePerHour activity",
                         summary,
                         DASHBOARD_URL
                 );
             }
 
-            prefs.edit().putString("activity_signature", signature).apply();
+            prefs.edit().putString("activity_signature_v14", signature).apply();
         } catch (Exception ignored) {
         }
     }
@@ -175,7 +158,7 @@ public class NotificationSyncService extends JobService {
         LinkedHashMap<String, String> result = new LinkedHashMap<>();
         Matcher matcher = JOB_PATTERN.matcher(html);
 
-        while (matcher.find() && result.size() < 40) {
+        while (matcher.find()) {
             String link = matcher.group(1);
             String title = cleanText(matcher.group(2));
             if (link == null || title.length() < 6) continue;
@@ -189,9 +172,9 @@ public class NotificationSyncService extends JobService {
         Matcher matcher = ACTIVITY_PATTERN.matcher(html);
         LinkedHashSet<String> parts = new LinkedHashSet<>();
 
-        while (matcher.find() && parts.size() < 4) {
+        while (matcher.find()) {
             String text = cleanText(matcher.group(1));
-            if (text.length() < 4 || text.length() > 180) continue;
+            if (text.length() < 4 || text.length() > 220) continue;
             String lower = text.toLowerCase();
             if (lower.equals("notifications") || lower.equals("messages") || lower.equals("workstream")) continue;
             parts.add(text);
@@ -201,9 +184,9 @@ public class NotificationSyncService extends JobService {
         for (String part : parts) {
             if (out.length() > 0) out.append(" • ");
             out.append(part);
-            if (out.length() > 280) break;
+            if (out.length() > 500) break;
         }
-        return out.length() > 300 ? out.substring(0, 300) : out.toString();
+        return out.length() > 600 ? out.substring(0, 600) : out.toString();
     }
 
     private static String fetch(String urlString, String cookie) throws Exception {
@@ -229,7 +212,7 @@ public class NotificationSyncService extends JobService {
             int read;
             while ((read = reader.read(buffer)) != -1) {
                 body.append(buffer, 0, read);
-                if (body.length() > 3_000_000) break;
+                if (body.length() > 4_000_000) break;
             }
             reader.close();
             return body.toString();
