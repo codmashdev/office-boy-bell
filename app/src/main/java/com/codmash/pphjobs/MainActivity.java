@@ -1,11 +1,14 @@
 package com.codmash.pphjobs;
 
+import android.Manifest;
 import android.app.Activity;
 import android.app.DownloadManager;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.view.View;
@@ -26,6 +29,7 @@ public class MainActivity extends Activity {
 
     private static final String START_URL = "https://www.peopleperhour.com/freelance-jobs";
     private static final int FILE_CHOOSER_REQUEST = 1001;
+    private static final int NOTIFICATION_PERMISSION_REQUEST = 1002;
 
     private WebView webView;
     private ProgressBar progressBar;
@@ -34,6 +38,10 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        NotificationHelper.createChannel(this);
+        NotificationSyncService.schedule(this);
+        requestNotificationPermissionIfNeeded();
 
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(Color.WHITE);
@@ -57,10 +65,15 @@ public class MainActivity extends Activity {
         setContentView(root);
         configureWebView();
 
+        String requestedUrl = getIntent() == null ? null : getIntent().getStringExtra("open_url");
+        String initialUrl = requestedUrl != null && requestedUrl.startsWith("https://www.peopleperhour.com")
+                ? requestedUrl
+                : START_URL;
+
         if (savedInstanceState != null) {
             webView.restoreState(savedInstanceState);
         } else {
-            webView.loadUrl(START_URL);
+            webView.loadUrl(initialUrl);
         }
     }
 
@@ -83,6 +96,8 @@ public class MainActivity extends Activity {
         cookies.setAcceptCookie(true);
         cookies.setAcceptThirdPartyCookies(webView, true);
 
+        webView.addJavascriptInterface(new WebNotificationBridge(this), "PPHAndroid");
+
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
@@ -99,6 +114,7 @@ public class MainActivity extends Activity {
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
                 CookieManager.getInstance().flush();
+                injectNotificationWatcher(view);
             }
         });
 
@@ -163,6 +179,39 @@ public class MainActivity extends Activity {
         });
     }
 
+    private void injectNotificationWatcher(WebView view) {
+        String script = "(function(){" +
+                "if(window.__pphNativeWatcher)return;window.__pphNativeWatcher=true;" +
+                "var last='';" +
+                "function clean(t){return (t||'').replace(/\\s+/g,' ').trim();}" +
+                "function scan(){try{" +
+                "var s=['[class*=notification][class*=unread]','[class*=notification] [class*=unread]','[class*=workstream][class*=unread]','[class*=message][class*=unread]','[aria-label*=Notification]','[aria-label*=notification]'];" +
+                "var found=[];s.forEach(function(q){document.querySelectorAll(q).forEach(function(el){var t=clean(el.innerText||el.textContent||el.getAttribute('aria-label'));if(t&&t.length<220)found.push(t);});});" +
+                "var text=found.filter(function(v,i,a){return a.indexOf(v)===i;}).slice(0,3).join(' • ');" +
+                "if(text&&text!==last){last=text;if(window.PPHAndroid)PPHAndroid.notifyNative('PeoplePerHour',text,location.href);}" +
+                "}catch(e){}}" +
+                "new MutationObserver(function(){setTimeout(scan,350);}).observe(document.documentElement,{subtree:true,childList:true,attributes:true});" +
+                "setTimeout(scan,1200);setInterval(scan,30000);" +
+                "})();";
+        view.evaluateJavascript(script, null);
+    }
+
+    private void requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, NOTIFICATION_PERMISSION_REQUEST);
+        } else {
+            NotificationHelper.showEnabledNoticeOnce(this);
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == NOTIFICATION_PERMISSION_REQUEST && grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            NotificationHelper.showEnabledNoticeOnce(this);
+        }
+    }
+
     private boolean handleUrl(Uri uri) {
         if (uri == null) return false;
 
@@ -191,6 +240,16 @@ public class MainActivity extends Activity {
             startActivity(new Intent(Intent.ACTION_VIEW, uri));
         } catch (Exception e) {
             Toast.makeText(this, "No app found to open this link", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        String url = intent == null ? null : intent.getStringExtra("open_url");
+        if (webView != null && url != null && url.startsWith("https://www.peopleperhour.com")) {
+            webView.loadUrl(url);
         }
     }
 
@@ -228,6 +287,7 @@ public class MainActivity extends Activity {
     protected void onDestroy() {
         if (webView != null) {
             webView.stopLoading();
+            webView.removeJavascriptInterface("PPHAndroid");
             webView.setWebChromeClient(null);
             webView.setWebViewClient(null);
             webView.destroy();
