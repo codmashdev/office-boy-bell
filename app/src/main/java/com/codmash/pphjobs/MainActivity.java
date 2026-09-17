@@ -42,7 +42,7 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        NotificationHelper.createChannel(this);
+        NotificationHelper.createChannels(this);
         NotificationSyncService.schedule(this);
 
         FrameLayout root = new FrameLayout(this);
@@ -81,11 +81,19 @@ public class MainActivity extends Activity {
         root.postDelayed(this::showNotificationSetup, 700);
     }
 
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (notificationsAreEnabled()) {
+            ForegroundMonitorService.start(this);
+        }
+    }
+
     private void showNotificationSetup() {
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             new AlertDialog.Builder(this)
                     .setTitle("Enable PeoplePerHour notifications")
-                    .setMessage("Allow notifications so new PeoplePerHour job and account alerts can appear in your notification tray and on your lock screen.")
+                    .setMessage("Allow notifications so PeoplePerHour messages and account alerts can appear in your notification tray and on your lock screen, even while the app is in the background.")
                     .setCancelable(false)
                     .setPositiveButton("Enable notifications", (dialog, which) ->
                             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, NOTIFICATION_PERMISSION_REQUEST))
@@ -95,6 +103,7 @@ public class MainActivity extends Activity {
         }
 
         if (notificationsAreEnabled()) {
+            ForegroundMonitorService.start(this);
             NotificationHelper.showEnabledNoticeOnce(this);
         } else {
             showNotificationSettingsDialog();
@@ -132,12 +141,13 @@ public class MainActivity extends Activity {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == NOTIFICATION_PERMISSION_REQUEST) {
             if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                ForegroundMonitorService.start(this);
                 NotificationHelper.show(this,
                         "permission_test_" + System.currentTimeMillis(),
                         "PPH notifications are working",
-                        "You will now be able to receive PeoplePerHour alerts in the notification tray and on the lock screen.",
+                        "Background monitoring is now active. New detected PeoplePerHour messages and alerts can appear before you open the app.",
                         START_URL);
-                Toast.makeText(this, "Notifications enabled", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "Notifications and background monitoring enabled", Toast.LENGTH_SHORT).show();
             } else {
                 showNotificationSettingsDialog();
             }
@@ -182,6 +192,9 @@ public class MainActivity extends Activity {
                 super.onPageFinished(view, url);
                 CookieManager.getInstance().flush();
                 injectNotificationWatcher(view);
+                if (notificationsAreEnabled()) {
+                    ForegroundMonitorService.refresh(MainActivity.this);
+                }
             }
         });
 
@@ -252,9 +265,9 @@ public class MainActivity extends Activity {
                 "var last='';" +
                 "function clean(t){return (t||'').replace(/\\s+/g,' ').trim();}" +
                 "function scan(){try{" +
-                "var s=['[class*=notification][class*=unread]','[class*=notification] [class*=unread]','[class*=workstream][class*=unread]','[class*=message][class*=unread]','[aria-label*=Notification]','[aria-label*=notification]'];" +
+                "var s=['[class*=notification][class*=unread]','[class*=notification] [class*=unread]','[class*=workstream][class*=unread]','[class*=message][class*=unread]','[aria-label*=Notification]','[aria-label*=notification]','[class*=badge]'];" +
                 "var found=[];s.forEach(function(q){document.querySelectorAll(q).forEach(function(el){var t=clean(el.innerText||el.textContent||el.getAttribute('aria-label'));if(t&&t.length<220)found.push(t);});});" +
-                "var text=found.filter(function(v,i,a){return a.indexOf(v)===i;}).slice(0,3).join(' • ');" +
+                "var text=found.filter(function(v,i,a){return a.indexOf(v)===i;}).slice(0,5).join(' • ');" +
                 "if(text&&text!==last){last=text;if(window.PPHAndroid)PPHAndroid.notifyNative('PeoplePerHour',text,location.href);}" +
                 "}catch(e){}}" +
                 "new MutationObserver(function(){setTimeout(scan,350);}).observe(document.documentElement,{subtree:true,childList:true,attributes:true});" +
